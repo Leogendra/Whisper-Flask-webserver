@@ -1,4 +1,5 @@
 Flask
 openai-whisper
+imageio-ffmpeg
 python-dotenv
 requests
