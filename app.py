@@ -14,6 +14,7 @@ from flask import (
 import requests
 import whisper
 import time
+import json
 import os
 
 
@@ -50,15 +51,27 @@ def get_model(size: str) -> whisper.Whisper:
 
 def transcribe_audio(audio_path: str, model_size: str = "small", lang: str = "fr"):
     model = get_model(model_size)
-
+    # measure generation time
+    t0 = time.time()
     result = model.transcribe(audio_path, language=lang)
+    t1 = time.time()
     transcription = result.get("text", "")
 
     timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-    out_name = f"transcription_{timestamp}.txt"
+    out_name = f"transcription_{timestamp}.json"
     output_path = os.path.join(RESULTS_DIR, out_name)
+
+    metadata = {
+        "timestamp": timestamp,
+        "temps_generation": round(t1 - t0, 3),
+        "modele_utilise": model_size,
+        "langage": lang,
+        "taille": model_size,
+        "text": transcription,
+    }
+
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write(transcription)
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
 
     return transcription, out_name
 
@@ -79,11 +92,11 @@ def require_auth(f):
 def login():
     if request.method == "POST":
         pwd = request.form.get("password", "")
-        if (SITE_PASSWORD and pwd == SITE_PASSWORD):
+        if SITE_PASSWORD and pwd == SITE_PASSWORD:
             session["authed"] = True
             next_url = request.args.get("next") or url_for("index")
-            time.sleep(1)
             return redirect(next_url)
+        flash("Incorrect password.", "error")
         time.sleep(3)
         flash("Mot de passe incorrect.", "error")
     return render_template("login.html")
@@ -130,7 +143,7 @@ def transcribe():
             if not allowed_file(filename):
                 return (
                     render_template(
-                        "result.html", error="Format de fichier non supporté."
+                        "result.html", error="Unsupported file format."
                     ),
                     400,
                 )
@@ -144,7 +157,7 @@ def transcribe():
             if not allowed_file(filename):
                 return (
                     render_template(
-                        "result.html", error="Format de fichier non supporte."
+                        "result.html", error="Unsupported file format."
                     ),
                     400,
                 )
@@ -152,7 +165,7 @@ def transcribe():
             audio_file.save(saved_path)
         else:
             return (
-                render_template("result.html", error="Aucun fichier ou URL fournis."),
+                render_template("result.html", error="No file or URL provided."),
                 400,
             )
 

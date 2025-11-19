@@ -11,7 +11,7 @@
 
 <body>
     <div class="container">
-        <h1>Authentification requise</h1>
+        <h1>Authentication required</h1>
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         {% for category, msg in messages %}
@@ -21,9 +21,9 @@
         {% endwith %}
 
         <form action="/login" method="post">
-            <label>Mot de passe</label>
+            <label>Password</label>
             <input type="password" name="password" autocomplete="current-password">
-            <button type="submit">Se connecter</button>
+            <button type="submit">Sign in</button>
         </form>
     </div>
 </body>

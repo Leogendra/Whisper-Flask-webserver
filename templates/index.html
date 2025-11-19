@@ -15,8 +15,8 @@
                 <header>
                         <div style="display:flex;justify-content:space-between;align-items:center">
                             <div>
-                                <h1>Transcription Audio</h1>
-                                <p class="subtitle">Uploader un fichier ou fournir une URL et choisir les options.</p>
+                                <h1>Audio Transcription</h1>
+                                <p class="subtitle">Upload a file or provide a URL and choose options.</p>
                             </div>
                             <div>
                                 {% if session.get('authed') %}
@@ -27,22 +27,22 @@
                 </header>
 
         <form id="transcribe-form" action="/transcribe" method="post" enctype="multipart/form-data">
-            <label>Uploader un fichier audio</label>
+            <label>Upload an audio file</label>
             <input type="file" name="audio_file" accept="audio/*">
 
-            <label>Ou fournir une URL directe</label>
+            <label>Or provide a direct URL</label>
             <input type="text" name="audio_url" placeholder="https://.../file.mp3">
 
             <div class="row">
                 <div class="col">
-                    <label>Langue</label>
+                    <label>Language</label>
                     <select name="lang">
                         <option value="fr">FR</option>
                         <option value="en">EN</option>
                     </select>
                 </div>
                 <div class="col">
-                    <label>Taille du modèle</label>
+                    <label>Model size</label>
                     <select name="model_size">
                         <option value="tiny">tiny (rapide)</option>
                         <option value="base">base</option>
@@ -53,8 +53,8 @@
                 </div>
             </div>
 
-            <p class="muted">Remarque: le téléchargement du modèle peut prendre du temps la première fois.</p>
-            <button id="submit-btn" type="submit">Transcrire</button>
+            <p class="muted">Note: model download may take time the first time.</p>
+            <button id="submit-btn" type="submit">Transcribe</button>
         </form>
     </div>
 </body>
