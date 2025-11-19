@@ -18,6 +18,9 @@ import whisper
 import time
 import json
 import os
+import subprocess
+import stat
+import traceback
 
 
 load_dotenv()
@@ -41,9 +44,14 @@ try:
     ffmpeg_dir = os.path.dirname(ffmpeg_exe)
     os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
     app.config["FFMPEG_BINARY"] = ffmpeg_exe
+    # check executable permission
+    app.config["FFMPEG_EXISTS"] = os.path.exists(ffmpeg_exe)
+    app.config["FFMPEG_EXECUTABLE"] = os.access(ffmpeg_exe, os.X_OK)
 except Exception:
     app.config["FFMPEG_BINARY"] = None
     print("Warning: Could not set FFMPEG_BINARY. Ensure ffmpeg is installed and in PATH.")
+    app.config["FFMPEG_EXISTS"] = False
+    app.config["FFMPEG_EXECUTABLE"] = False
 
 _MODEL_CACHE = {}
 TRANSCRIBE_LOCK = threading.Lock()
@@ -63,8 +71,39 @@ def get_model(size: str) -> whisper.Whisper:
 
 def transcribe_audio(audio_path: str, model_size: str = "small", lang: str = "fr"):
     model = get_model(model_size)
-    # measure generation time
     t0 = time.time()
+
+    # Ensure whisper uses the absolute ffmpeg binary provided by imageio-ffmpeg
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        ffmpeg_exe = None
+
+    if ffmpeg_exe:
+        try:
+            import whisper.audio as _wa
+            import subprocess as _sub
+
+            def _run_with_abs_ffmpeg(cmd, *a, **kw):
+                if isinstance(cmd, (list, tuple)):
+                    cmd2 = [ffmpeg_exe if (isinstance(c, str) and c == "ffmpeg") else c for c in cmd]
+                elif isinstance(cmd, str):
+                    # Only replace the first occurrence at start to be safe
+                    if cmd.startswith("ffmpeg"):
+                        cmd2 = cmd.replace("ffmpeg", ffmpeg_exe, 1)
+                    else:
+                        cmd2 = cmd
+                else:
+                    cmd2 = cmd
+                return _sub.run(cmd2, *a, **kw)
+
+            # Monkeypatch whisper.audio.run to ensure absolute ffmpeg usage
+            _wa.run = _run_with_abs_ffmpeg
+        except Exception:
+            pass
+
+    # load and transcribe
     result = model.transcribe(audio_path, language=lang)
     t1 = time.time()
     transcription = result.get("text", "").strip()
@@ -75,7 +114,7 @@ def transcribe_audio(audio_path: str, model_size: str = "small", lang: str = "fr
 
     metadata = {
         "timestamp": timestamp,
-        "generation_time_s": round(t1 - t0, 3),
+        "generation_time_s": round(t1 - t0, 1),
         "model_size": model_size,
         "language": lang,
         "text": transcription,
@@ -198,7 +237,20 @@ def transcribe():
             lang=lang,
         )
     except Exception as e:
-        return render_template("result.html", error=str(e)), 500
+        tb = traceback.format_exc()
+        debug_info = {
+            "error": str(e),
+            "traceback": tb,
+            "cwd": os.getcwd(),
+            "uid": getattr(os, 'getuid', lambda: None)(),
+            "gid": getattr(os, 'getgid', lambda: None)(),
+            "env_path": os.environ.get('PATH'),
+        }
+
+        return render_template(
+            "result.html",
+            error=str(e)
+        ), 500
     finally:
         try:
             TRANSCRIBE_LOCK.release()
