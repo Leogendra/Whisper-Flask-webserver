@@ -1,30 +1,23 @@
 from werkzeug.utils import secure_filename
 import imageio_ffmpeg as iio_ffmpeg
-from dotenv import load_dotenv
-from functools import wraps
 from flask import (
     Flask,
     request,
     render_template,
     send_from_directory,
-    redirect,
-    url_for,
-    session,
-    flash,
 )
-import threading
+import traceback
 import requests
 import whisper
+import torch
 import time
 import json
 import os
-import subprocess
-import stat
-import traceback
 
+CUDA_AVAILABLE = torch.cuda.is_available()
+DEVICE = "cuda" if CUDA_AVAILABLE else "cpu"
+print(f"Whisper device: {DEVICE}, cuda_available: {CUDA_AVAILABLE}")
 
-load_dotenv()
-SITE_PASSWORD = os.getenv("PASSWORD")
 
 app = Flask(__name__)
 MODEL_SIZES = ["tiny", "base", "small", "medium", "large"]
@@ -37,14 +30,13 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_DIR
 app.config["OUTPUT_FOLDER"] = RESULTS_DIR
-app.secret_key = SITE_PASSWORD
 
+# Setup ffmpeg binary from imageio-ffmpeg
 try:
     ffmpeg_exe = iio_ffmpeg.get_ffmpeg_exe()
     ffmpeg_dir = os.path.dirname(ffmpeg_exe)
     os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
     app.config["FFMPEG_BINARY"] = ffmpeg_exe
-    # check executable permission
     app.config["FFMPEG_EXISTS"] = os.path.exists(ffmpeg_exe)
     app.config["FFMPEG_EXECUTABLE"] = os.access(ffmpeg_exe, os.X_OK)
 except Exception:
@@ -53,23 +45,17 @@ except Exception:
     app.config["FFMPEG_EXISTS"] = False
     app.config["FFMPEG_EXECUTABLE"] = False
 
-_MODEL_CACHE = {}
-TRANSCRIBE_LOCK = threading.Lock()
-
 
 
 
 def get_model(size: str) -> whisper.Whisper:
     size = size if size in MODEL_SIZES else "small"
-    if size in _MODEL_CACHE:
-        return _MODEL_CACHE[size]
-
-    model = whisper.load_model(size)
-    _MODEL_CACHE[size] = model
+    load_kwargs = {"device": DEVICE}
+    model = whisper.load_model(size, **load_kwargs)
     return model
 
 
-def transcribe_audio(audio_path: str, model_size: str = "small", lang: str = "fr"):
+def transcribe_audio(audio_path: str, model_size: str = "small", lang: str = "fr") -> tuple[str, str]:
     model = get_model(model_size)
     t0 = time.time()
 
@@ -126,56 +112,17 @@ def transcribe_audio(audio_path: str, model_size: str = "small", lang: str = "fr
     return transcription, out_name
 
 
-def require_auth(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if session.get("authed"):
-            return f(*args, **kwargs)
-        return redirect(url_for("login", next=request.path))
-
-    return wrapper
-
-
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        pwd = request.form.get("password", "")
-        if SITE_PASSWORD and pwd == SITE_PASSWORD:
-            session["authed"] = True
-            next_url = request.args.get("next") or url_for("index")
-            return redirect(next_url)
-        time.sleep(3)
-        flash("Incorrect password.", "error")
-    return render_template("login.html")
-
-
-@app.route("/logout")
-def logout():
-    session.pop("authed", None)
-    return redirect(url_for("login"))
-
-
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
 
 @app.route("/")
-@require_auth
 def index():
     return render_template("index.html", model_sizes=MODEL_SIZES, langs=LANG_CODES)
 
 
 @app.route("/transcribe", methods=["POST"])
-@require_auth
 def transcribe():
-    # Ensure only one transcription runs at a time
-    acquired = TRANSCRIBE_LOCK.acquire(blocking=False)
-    if not acquired:
-        time.sleep(5)
-        return render_template("result.html", error="Server busy: another transcription is running. Please try again."), 429
-
     try:
         model_size = request.form.get("model_size", "small")
         lang = request.form.get("lang", "fr")
@@ -251,15 +198,9 @@ def transcribe():
             "result.html",
             error=str(e)
         ), 500
-    finally:
-        try:
-            TRANSCRIBE_LOCK.release()
-        except RuntimeError:
-            pass
 
 
 @app.route("/outputs/<path:filename>")
-@require_auth
 def outputs(filename):
     return send_from_directory(
         app.config["OUTPUT_FOLDER"], filename, as_attachment=True
