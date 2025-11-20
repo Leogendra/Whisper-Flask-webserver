@@ -26,6 +26,8 @@ ALLOWED_EXT = {"mp3", "wav", "m4a", "flac", "ogg"}
 UPLOAD_DIR = "audios"
 RESULTS_DIR = "results"
 
+_MODEL_INSTANCE = None
+_MODEL_INSTANCE_SIZE = None
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_DIR
@@ -49,9 +51,17 @@ except Exception:
 
 
 def get_model(size: str) -> whisper.Whisper:
-    size = size if size in MODEL_SIZES else "small"
+    global _MODEL_INSTANCE, _MODEL_INSTANCE_SIZE
+
+    # Reuse existing model if it's already loaded with the requested size
+    if _MODEL_INSTANCE is not None and _MODEL_INSTANCE_SIZE == size:
+        return _MODEL_INSTANCE
+
     load_kwargs = {"device": DEVICE}
     model = whisper.load_model(size, **load_kwargs)
+    _MODEL_INSTANCE = model
+    _MODEL_INSTANCE_SIZE = size
+
     return model
 
 
